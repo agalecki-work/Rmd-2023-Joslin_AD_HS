@@ -1,0 +1,229 @@
+---
+title: 'Data imputation'
+author: "ATG"
+date: "`r as.character(Sys.Date(), format = '%A %B %d, %Y')`"
+output:
+   rmdformats::readthedown:
+      lightbox: true
+      use_bookdown: true
+---
+
+
+```{r knitr-setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, comment="#>")
+```
+
+```{r output, echo = FALSE}
+library(tidyverse)
+```
+
+# Introduction
+
+* Data imputation performed using `missForest` package
+
+# Original data
+
+```{r assign-Rdata-nm, echo = FALSE}
+data_version <- "040323"   # Date 
+Rdata_nm <- paste0("olink_analytical_dataset", data_version)
+```
+
+Dataset `r Rdata_nm` stored in external file is loaded
+
+```{r load-data}
+Rdata_nm    # Original data 
+fpath <- paste0("./data/", Rdata_nm,".Rdata")
+load(fpath, verbose = TRUE)
+```
+
+Selected variables described for reference.
+
+* `PRIMARY`: Primary outcome (ESKD/Dialysis, 0=NO, 1=YES)
+* `YRS_PRIMARY`: Time to primary outcome or censoring (years)
+* `CASE40_JUNE`: Secondary outcome (ESKD/Dialysis, or >=2 eGFR during FU or last eGFR during follow-up showing 40% decline from F04, 0=NO,1=YES )
+* `YRS_CASE40_JUN`: Time to secondary outcome or censoring (years)
+* `DECLINE40`: >=2 eGFR during FU showing 40% decline from F04 (0=NO, 1=YES )
+* `LASTGFR_40_4`: Last eGFR during FU showing 40% decline from F04 (0=NO, 1=YES )
+* `DECLINE40_PLUS`: >=2 eGFR or last eGFR during FU showing 40% decline from F04 (0=NO, 1=YES )
+* `YRS_DECLINE40_PLUS`: Time to >=2 eGFR or last eGFR during FU showing 40% decline from F04  or censoring (years)
+* `TM_ACCORDION`: Death from any cause (0=NO, 1=YES )
+* `FU_TM_ACCORDION`: Time to death from any cause (years)
+* `STATUS_PRI`:	Status for primary outcome (0=censored, 1=primary outcome, 2=death before primary outcome)
+* `STATUS_SEC`:	Status for secondary outcome (0= censored, 1=secondary outcome, 2=death before secondary outcome)
+
+Data stored in `orig_data` data frame.
+
+```{r save-in-orig_data}
+assign("orig_data", eval(as.name(Rdata_nm)))
+dim(orig_data) # No of rows and vars
+```
+
+Drop rows with invalid data.
+
+```{r drop-time0}
+orig_datax <- orig_data %>% filter(YRS_PRIMARY > 0) %>% filter(YRS_CASE40_JUN > 0)
+dim(orig_datax)
+orig_datax$DECLINE40 <- as.factor(orig_datax$DECLINE40)
+orig_datax$recno <- 1:nrow(orig_datax)
+```
+
+Show (invalid) data rows with time <= 0
+
+```{r show-drop-data}
+range(orig_data$YRS_PRIMARY)
+range(orig_data$YRS_CASE40_JUN)
+dt_drop <- orig_data %>% select (MASKID, SUBCO15, YRS_PRIMARY,YRS_CASE40_JUN, STATUS_PRI, STATUS_SEC) %>%
+  mutate (time_0 = ifelse(YRS_PRIMARY <= 0 | YRS_CASE40_JUN <=  0, 1, 0)) %>% filter(time_0 == 1)
+dt_drop
+```
+
+Glimpse `orig_datax`
+
+```{r glimpse-orig_datax}
+glimpse(orig_datax)
+```
+
+
+# Missing values
+
+```{r miss-values}
+miss_vals <- sapply(orig_datax, function(x) sum(is.na(x)))
+miss_vals[miss_vals > 0]
+names(miss_vals[miss_vals == 0]) # Variables wout missing values
+```
+
+# Var groups
+
+
+* `clin_vars`: Demographic/Clinical
+* `protein_vars`: Protein variables BM1, ..., BM21
+
+```{r xvars}
+all_vars <- names(orig_datax)
+clin_vars <- c("AGE", "FEMALE", "BMI", "HBA1C", "BASE_GFR", "LOG_BASE_UACR","GFR_F04" )
+protein_vars <- paste0("BM", 1:21)
+xvars <- c(clin_vars, protein_vars)
+(lenx <- length(xvars)) # No of candidate predictors
+xvars # List of candidate biomarkers
+tvars <- c("YRS_PRIMARY", "PRIMARY", "CASE40_JUNE","YRS_CASE40_JUN", "SUBCO15", "DECLINE40")
+
+```
+
+Create list of variables used by missForest for imputation
+
+```{r missForest-variables}
+(miss_vars <- c(xvars, tvars))
+bmq_vars <- paste0("BMQ_", 1:21)
+drvd_vars <- c(bmq_vars, "BASE_UACR") # Variables that can be derived from others
+remaining_vars <- setdiff(all_vars, c(miss_vars, drvd_vars))
+
+length(miss_vars)
+length(drvd_vars)
+length(remaining_vars)
+length(all_vars)
+```
+
+List of vars not used by missForest
+
+```{r remaining-vars}
+drvd_vars       # Derived vars  
+remaining_vars
+```
+
+# Auxiliary data
+
+
+```{r tbl-miss}
+orig_dtx_miss <- orig_datax %>% select(all_of(miss_vars))
+orig_dtx_remaining <- orig_datax %>% select(all_of(remaining_vars))
+```
+
+```{r glimpse}
+glimpse(orig_dtx_miss)
+```
+# MissForest for subcohort
+
+```{r miss1-create}
+library(missForest)
+orig_miss1     <- orig_dtx_miss[orig_dtx_miss$SUBCO15==1, ]
+orig_remaining1 <- orig_dtx_remaining[orig_dtx_miss$SUBCO15==1,]
+```
+
+```{r miss1-impute}
+orig_impt1 <- missForest(orig_miss1, verbose = TRUE)
+names(orig_impt1)
+class(orig_impt1)
+```
+
+```{r cbind1}
+dt1 <-cbind(orig_impt1$ximp, orig_remaining1) 
+```
+
+# MissForest outside of subcohort
+
+```{r miss0-create}
+#library(missForest)
+orig_miss0      <- orig_dtx_miss[orig_dtx_miss$SUBCO15==0, ]
+orig_remaining0 <- orig_dtx_remaining[orig_dtx_miss$SUBCO15==0,]
+```
+
+```{r miss0-impute}
+orig_impt0 <- missForest(orig_miss0, verbose = TRUE)
+names(orig_impt0)
+class(orig_impt0)
+```
+
+```{r cbind0}
+dt0 <- cbind(orig_impt0$ximp, orig_remaining0) 
+```
+
+# Combine imputed data
+
+```{r rbind}
+dtx <- rbind(dt1, dt0)
+dtx_imputed <- dtx %>% arrange(recno)
+dim(dtx_imputed)
+names(dtx_imputed)
+```
+
+```{r Rdata_nm2}
+Rdata_nm2 <- paste0("olink_analytical_imputed", data_version)
+Rdpath <- paste0("./saved/", Rdata_nm2, ".Rdata")
+save(dtx_imputed, file = Rdpath)
+```
+
+Create dbf file
+```{r dbf}
+library(foreign)
+dbf_path <-  paste0("./saved/", Rdata_nm2, ".dbf")
+write.dbf(dtx_imputed, dbf_path)
+```
+
+## Check missing values
+
+```{r miss-values-1}
+miss_vals <- sapply(dtx, function(x) sum(is.na(x)))
+miss_vals[miss_vals > 0]
+names(miss_vals[miss_vals == 0]) # Variables wout missing values
+```
+
+## Check selected variables
+
+```{r compare}
+t1 <- dtx_imputed$FEMALE - orig_datax$FEMALE
+range(t1)
+```
+```{r knitr-knit_exit2, echo = FALSE}
+knitr::knit_exit()
+```
+
+
+## Check var ranges
+
+
+```{r Check var ranges}
+orig_datax  %>% filter(if_any(where(is.numeric), ~ .x < 0)) %>%
+ select(MASKID, BM6, BM19)
+```
+
+

@@ -1,0 +1,8 @@
+# Auxiliary code sourced by other R programs
+options(width = 80)
+  
+nmRmd <- paste0(bnm, ".Rmd")
+nmR <- paste0("./purl/", bnm,".Rprog")
+knitr::purl(nmRmd, output = nmR)
+
+rmarkdown::render(nmRmd, "all")
