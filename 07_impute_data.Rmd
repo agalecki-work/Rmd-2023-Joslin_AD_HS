@@ -32,7 +32,11 @@ Dataset `r Rdata_nm` stored in external file is loaded
 
 ```{r load-data}
 Rdata_nm    # Original data 
-fpath <- paste0("./data/", Rdata_nm,".Rdata")
+## fpath <- paste0("./data/", Rdata_nm,".Rdata")
+PathIn1
+DataIn1
+
+fpath <- paste0(PathIn1,"/",DataIn1)
 load(fpath, verbose = TRUE)
 ```
 

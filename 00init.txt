@@ -1,6 +1,9 @@
 # Auxiliary code sourced by other R programs
 options(width = 80)
-  
+
+PathIn1 <- "C:/temp/2023_Joslin_AD_IO"
+Datain1 <- "data/olink_analytical_dataset040323.Rdata"   # Raw data 
+
 nmRmd <- paste0(bnm, ".Rmd")
 nmR <- paste0("./purl/", bnm,".Rprog")
 knitr::purl(nmRmd, output = nmR)
